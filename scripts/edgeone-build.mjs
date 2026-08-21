@@ -276,15 +276,34 @@ function injectLayoutAuthCheck() {
   const authCheck = `
   // EdgeOne SSR auth guard
   const __h = await headers();
-  let __path = __h.get('x-pathname') || __h.get('x-invoke-path') || '';
+  // EdgeOne has used different request-path headers across Pages runtimes.
+  // Do not default an unknown path to '/' because that redirects /login to itself.
+  const __pathHeaders = [
+    'x-pathname', 'x-invoke-path', 'x-matched-path', 'x-original-url',
+    'x-forwarded-uri', 'x-rewrite-url', 'x-edgeone-path', 'x-edgeone-request-path',
+    'x-request-uri', 'x-url',
+  ];
+  let __path = '';
+  for (const __headerName of __pathHeaders) {
+    const __value = __h.get(__headerName) || '';
+    if (!__value) continue;
+    try {
+      __path = new URL(__value, 'http://edgeone.invalid').pathname;
+    } catch {
+      __path = __value.split('?')[0];
+    }
+    if (__path.startsWith('/')) break;
+    __path = '';
+  }
   if (!__path) {
     const __ref = __h.get('referer') || '';
     try { if (__ref) __path = new URL(__ref).pathname; } catch {}
   }
-  if (!__path) __path = '/';
 
   const __skipPaths = ${pageSkipPaths};
-  if (!__skipPaths.some((p) => __path.startsWith(p))) {
+  // If the adapter did not expose the current path, leave routing to the
+  // EdgeOne middleware instead of making a potentially incorrect redirect.
+  if (__path && !__skipPaths.some((p) => __path.startsWith(p))) {
     const __cookieStore = await cookies();
     const __authCookie = __cookieStore.get('user_auth') || __cookieStore.get('auth');
     if (!__authCookie) {
