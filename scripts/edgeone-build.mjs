@@ -295,10 +295,6 @@ function injectLayoutAuthCheck() {
     if (__path.startsWith('/')) break;
     __path = '';
   }
-  if (!__path) {
-    const __ref = __h.get('referer') || '';
-    try { if (__ref) __path = new URL(__ref).pathname; } catch {}
-  }
 
   const __skipPaths = ${pageSkipPaths};
   // If the adapter did not expose the current path, leave routing to the
