@@ -440,7 +440,7 @@ export const UserMenu: React.FC = () => {
             </div>
             <div className='flex items-center justify-between'>
               <div className='font-semibold text-gray-900 dark:text-gray-100 text-sm truncate'>
-                {authInfo?.username || 'default'}
+                {authInfo?.username || '游客'}
               </div>
               <div className='text-[10px] text-gray-400 dark:text-gray-500'>
                 数据存储：
