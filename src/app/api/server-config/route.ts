@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
     Version: CURRENT_VERSION,
     DownloadEnabled: config.DownloadConfig?.enabled ?? true,
     requireInviteCode: config.UserConfig?.RequireInviteCode ?? false,
+    AllowRegister: config.UserConfig?.AllowRegister ?? true,
   };
 
   // 添加 Telegram 登录配置（仅公开必要信息）

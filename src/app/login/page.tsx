@@ -75,6 +75,7 @@ function LoginPageClient() {
   const [loading, setLoading] = useState(false);
   const shouldAskUsername = process.env.NEXT_PUBLIC_STORAGE_TYPE !== 'localstorage';
   const [bingWallpaper, setBingWallpaper] = useState<string>('');
+  const [allowRegister, setAllowRegister] = useState(false);
 
   // Telegram Magic Link 状态
   const [telegramLoading, setTelegramLoading] = useState(false);
@@ -119,6 +120,7 @@ function LoginPageClient() {
         console.log('[Login] Fetching server config...');
         const response = await fetch('/api/server-config');
         const data = await response.json();
+        setAllowRegister(data.StorageType !== 'localstorage' && data.AllowRegister !== false);
         console.log('[Login] Server config received:', data);
         console.log('[Login] TelegramAuthConfig:', data.TelegramAuthConfig);
         if (data.TelegramAuthConfig?.enabled) {
@@ -352,7 +354,7 @@ function LoginPageClient() {
           </button>
 
           {/* 注册链接 - 仅在非 localStorage 模式下显示 */}
-          {shouldAskUsername && (
+          {shouldAskUsername && allowRegister && (
             <div className='mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-200 dark:border-gray-700'>
               <p className='text-center text-gray-600 dark:text-gray-400 text-xs sm:text-sm mb-2.5 sm:mb-3'>
                 还没有账户？
