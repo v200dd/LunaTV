@@ -645,11 +645,14 @@ export class EmbyClient {
     await this.ensureAuthenticated();
     const token = this.apiKey || this.authToken;
 
-    // 如果启用了代理播放且不是强制获取直接URL，返回代理URL
-    if (this.proxyPlay && !forceDirectUrl) {
+    // 如果启用了代理播放且不是强制获取直接URL，返回代理URL。
+    // 注意：transcodeMp4 实际返回的是 HLS（master.m3u8），不能塞进
+    // /api/emby/play/proxy/video.mp4 —— 否则 ArtPlayer 会按 mp4 原生播放，
+    // Chrome/Edge 无法播放 HLS，且不会触发 hls.js 的第一方代理降级。
+    if (this.proxyPlay && !forceDirectUrl && !this.transcodeMp4) {
       // 使用固定的token占位符，实际验证在服务端进行
       const subscribeToken = 'proxy';
-      const filename = this.transcodeMp4 ? 'video.mp4' : 'video';
+      const filename = 'video';
 
       // 构建代理URL（相对路径）
       let proxyUrl = `/api/emby/play/${subscribeToken}/${filename}?itemId=${itemId}`;
