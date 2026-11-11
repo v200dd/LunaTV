@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getCachedEmbyViews, setCachedEmbyViews } from '@/lib/emby-cache';
+import { embyUserCacheKey, getCachedEmbyViews, setCachedEmbyViews } from '@/lib/emby-cache';
 import { embyManager } from '@/lib/emby-manager';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     const username = authCookie.username;
 
     // 检查缓存（按embyKey缓存）
-    const cacheKey = embyKey || 'default';
+    const cacheKey = embyUserCacheKey(username, embyKey);
     const cached = getCachedEmbyViews(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
@@ -61,6 +61,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       error: '获取 Emby 媒体库列表失败: ' + (error as Error).message,
       views: [],
-    });
+    }, { status: 502 });
   }
 }

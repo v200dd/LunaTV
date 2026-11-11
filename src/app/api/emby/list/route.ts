@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getCachedEmbyList, setCachedEmbyList } from '@/lib/emby-cache';
+import { embyUserCacheKey, getCachedEmbyList, setCachedEmbyList } from '@/lib/emby-cache';
 import { embyManager } from '@/lib/emby-manager';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 
@@ -29,13 +29,14 @@ export async function GET(request: NextRequest) {
     }
 
     const username = authCookie.username;
+    const cacheKey = embyUserCacheKey(username, embyKey);
 
     // 判断是否是默认排序（只有默认排序才使用缓存）
     const isDefaultSort = sortBy === 'SortName' && sortOrder === 'Ascending';
 
     // 只有默认排序才检查缓存
     if (isDefaultSort) {
-      const cached = getCachedEmbyList(page, pageSize, parentId, embyKey);
+      const cached = getCachedEmbyList(page, pageSize, parentId, cacheKey);
       if (cached) {
         return NextResponse.json(cached);
       }
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
 
     // 只有默认排序才缓存结果
     if (isDefaultSort) {
-      setCachedEmbyList(page, pageSize, response, parentId, embyKey);
+      setCachedEmbyList(page, pageSize, response, parentId, cacheKey);
     }
 
     return NextResponse.json(response);
@@ -89,6 +90,6 @@ export async function GET(request: NextRequest) {
       totalPages: 0,
       currentPage: page,
       total: 0,
-    });
+    }, { status: 502 });
   }
 }

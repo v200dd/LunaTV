@@ -4414,6 +4414,17 @@ function PlayPageClient() {
               video.hls.destroy();
             }
 
+            // Older Safari/iOS exposes native HLS but no supported MSE. Do not
+            // attach hls.js there: it leaves an otherwise playable video blank.
+            if (!Hls.isSupported()) {
+              if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = url;
+              } else {
+                if (artPlayerRef.current) artPlayerRef.current.notice.show = '当前浏览器不支持 HLS 播放';
+              }
+              return;
+            }
+
             // ☁️ 新地址加载，重置 Worker 代理 / 第一方代理降级标记
             (video as any)._proxyFallbackDone = false;
             (video as any)._firstPartyProxyFallbackDone = false;
@@ -4580,7 +4591,7 @@ function PlayPageClient() {
               }
               // 🧭 直连失败时，最后尝试走本站第一方 m3u8 代理——常见于上游要求
               // 特定 Referer/UA 或不返回 CORS 头，浏览器直连必然失败。
-              if (!(video as any)._firstPartyProxyFallbackDone && !isFirstPartyM3u8Proxy(activeUrl)) {
+              if (!(video as any)._firstPartyProxyFallbackDone && !isFirstPartyM3u8Proxy(activeUrl) && !activeUrl.includes('/api/emby/play/')) {
                 (video as any)._firstPartyProxyFallbackDone = true;
                 const proxiedUrl = applyFirstPartyM3u8Proxy(activeUrl);
                 console.warn('直连错误，降级为第一方代理:', proxiedUrl);

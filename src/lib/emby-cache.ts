@@ -12,6 +12,11 @@ const EMBY_VIEWS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 1天
 const EMBY_CACHE: Map<string, EmbyCachedEntry<any>> = new Map();
 const EMBY_VIEWS_CACHE_KEY = 'emby:views';
 
+/** Scope by account AND source: private libraries often share the same key. */
+export function embyUserCacheKey(username: string, source?: string): string {
+  return JSON.stringify([username, source || 'default']);
+}
+
 /**
  * 生成 Emby 列表缓存键
  */

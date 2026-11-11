@@ -66,6 +66,7 @@ const embyViewsOptions = (embyEnabled: boolean, embyKey?: string) => queryOption
     if (embyKey) params.append('embyKey', embyKey);
     const res = await fetch(`/api/emby/views?${params.toString()}`);
     const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || '获取媒体库失败');
     return (data.success ? data.views : []) as EmbyView[];
   },
   enabled: embyEnabled && !!embyKey,
@@ -92,8 +93,8 @@ const embyListOptions = (
     if (embyKey) params.append('embyKey', embyKey);
 
     const res = await fetch(`/api/emby/list?${params.toString()}`, { signal });
-    if (!res.ok) throw new Error('获取列表失败');
     const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || '获取列表失败');
 
     return {
       list: (data.list ?? []).map((item: any): Video => ({

@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { embyManager } from '@/lib/emby-manager';
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getCachedMediaIndex, setCachedMediaIndex } from '@/lib/emby-cache';
+import { embyUserCacheKey, getCachedMediaIndex, setCachedMediaIndex } from '@/lib/emby-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const client = await embyManager.getClientForUser(username, embyKeyStr);
 
     // 尝试从本地索引搜索（缓存 key 区分 parentId）
-    const cacheKey = parentId ? `${embyKeyStr}:${parentId}` : embyKeyStr;
+    const cacheKey = JSON.stringify([embyUserCacheKey(username, embyKeyStr), parentId || '']);
     let index = getCachedMediaIndex(cacheKey);
 
     if (!index) {

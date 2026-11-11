@@ -1,142 +1,98 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, no-console */
-
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
+import { embyManager } from '@/lib/emby-manager';
+import { readEmbyPlaylist, rewriteEmbyPlaylist, verifyEmbyResource } from '@/lib/emby-playback';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-/**
- * 获取 Emby 客户端
- * 优先使用用户配置，TVBox token 场景回退到全局配置
- */
 async function getEmbyClient(embyKey?: string, username?: string) {
-  const { embyManager } = await import('@/lib/emby-manager');
-  if (username) {
-    return await embyManager.getClientForUser(username, embyKey);
-  }
+  if (username) return embyManager.getClientForUser(username, embyKey);
   const config = await getConfig();
-  if (!config.EmbyConfig?.Sources || config.EmbyConfig.Sources.length === 0) {
-    throw new Error('Emby 未配置或未启用');
-  }
-  return await embyManager.getClient(embyKey);
+  if (!config.EmbyConfig?.Sources?.length) throw new Error('Emby 未配置或未启用');
+  return embyManager.getClient(embyKey);
 }
 
-/**
- * GET /api/emby/play/{token}/{filename}?itemId=xxx
- * 代理 Emby 视频播放链接，URL 中包含文件扩展名（如 video.mp4）
- * 实际返回的内容根据 Emby 服务器的 Content-Type 决定
- *
- * 权限验证：TVBox Token（路径参数） 或 用户登录（满足其一即可）
- */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string; filename: string }> }
 ) {
   try {
-    const { token: requestToken, filename } = await params;
-    const { searchParams } = new URL(request.url);
-
-    // 双重验证：TVBox Token 或 用户登录
-    const subscribeToken = process.env.TVBOX_SUBSCRIBE_TOKEN;
-    const authInfo = getAuthInfoFromCookie(request);
-
-    // 验证 TVBox Token
-    const hasValidToken = subscribeToken && requestToken === subscribeToken;
-    // 验证用户登录
-    const hasValidAuth = authInfo && authInfo.username;
-
-    // 两者至少满足其一
-    if (!hasValidToken && !hasValidAuth) {
-      return NextResponse.json({ error: '未授权' }, { status: 401 });
+    const { token, filename } = await params;
+    const query = request.nextUrl.searchParams;
+    const auth = getAuthInfoFromCookie(request);
+    const hasSubscription = !!process.env.TVBOX_SUBSCRIBE_TOKEN && token === process.env.TVBOX_SUBSCRIBE_TOKEN;
+    if (!hasSubscription && !auth?.username) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
-
-    const itemId = searchParams.get('itemId');
-    const embyKey = searchParams.get('embyKey') || undefined;
-
-    if (!itemId) {
-      return NextResponse.json({ error: '缺少 itemId 参数' }, { status: 400 });
+    const itemId = query.get('itemId');
+    if (!itemId) return NextResponse.json({ error: '缺少 itemId 参数' }, { status: 400 });
+    const embyKey = query.get('embyKey') || undefined;
+    const audioValue = query.get('audioStreamIndex');
+    const audioStreamIndex = audioValue !== null ? Number(audioValue) : undefined;
+    if (audioStreamIndex !== undefined && (!Number.isInteger(audioStreamIndex) || audioStreamIndex < 0)) {
+      return NextResponse.json({ error: '无效的音轨索引' }, { status: 400 });
     }
-
-    // 获取 Emby 客户端
-    let client = await getEmbyClient(embyKey, authInfo?.username);
-
-    // 构建 Emby 原始播放链接（强制获取直接URL，避免代理循环）
-    let embyStreamUrl = await client.getStreamUrl(itemId, true, true);
-
-    // 构建请求头，转发 Range 请求
-    const requestHeaders: HeadersInit = {};
-    const rangeHeader = request.headers.get('range');
-    if (rangeHeader) {
-      requestHeaders['Range'] = rangeHeader;
+    let client = await getEmbyClient(embyKey, auth?.username);
+    const resource = query.get('resource');
+    if (resource && !verifyEmbyResource(resource, itemId, query.get('signature') || '', await client.getPlaybackProxySecret())) {
+      return NextResponse.json({ error: '无效的播放资源签名' }, { status: 403 });
     }
-
-    // 流式代理视频内容
-    let videoResponse = await fetch(embyStreamUrl, {
-      headers: requestHeaders,
+    let upstream = resource || await client.getStreamUrl(itemId, true, true, audioStreamIndex);
+    const fetchStream = () => fetch(upstream, {
+      headers: {
+        // Signed CDN resources may be on another origin. Never forward the
+        // Emby credentials there; preserve the upstream URL's own query auth.
+        ...client.getPlaybackHeaders(upstream),
+        'Accept-Encoding': 'identity',
+        ...(request.headers.get('range') ? { Range: request.headers.get('range')! } : {}),
+        ...(request.headers.get('if-range') ? { 'If-Range': request.headers.get('if-range')! } : {}),
+      },
+      cache: 'no-store',
+      signal: request.signal,
     });
-
-    // 如果返回 401，尝试重新认证并重试
-    if (videoResponse.status === 401) {
-      console.log('[Emby Play] 收到 401 错误，尝试重新认证');
-      const { embyManager } = await import('@/lib/emby-manager');
-      embyManager.clearCache();
-      client = await getEmbyClient(embyKey, authInfo?.username);
-      embyStreamUrl = await client.getStreamUrl(itemId, true, true);
-      videoResponse = await fetch(embyStreamUrl, {
-        headers: requestHeaders,
+    let response = await fetchStream();
+    if (response.status === 401 && !resource) {
+      await response.body?.cancel();
+      if (auth?.username) embyManager.clearUserCache(auth.username);
+      else embyManager.clearCache();
+      client = await getEmbyClient(embyKey, auth?.username);
+      upstream = await client.getStreamUrl(itemId, true, true, audioStreamIndex);
+      response = await fetchStream();
+    }
+    const headers = new Headers({ 'Cache-Control': 'private, no-store' });
+    for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
+      const value = response.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      headers.delete('content-length');
+      headers.set('content-type', 'application/json');
+      return new NextResponse(JSON.stringify({ error: `Emby 视频请求失败 (${response.status})` }), {
+        status: response.status, headers,
       });
     }
-
-    if (!videoResponse.ok) {
-      console.error('[Emby Play] 获取视频流失败:', {
-        itemId,
-        status: videoResponse.status,
-        statusText: videoResponse.statusText,
-      });
-      return NextResponse.json(
-        { error: '获取视频流失败' },
-        { status: 500 }
-      );
+    const contentType = response.headers.get('content-type') || '';
+    const finalUrl = response.url || upstream;
+    if (/mpegurl/i.test(contentType) || /\.m3u8$/i.test(new URL(finalUrl).pathname)) {
+      const text = await readEmbyPlaylist(response);
+      if (!text.trimStart().startsWith('#EXTM3U')) throw new Error('Emby 返回了无效的 HLS 播放列表');
+      const playlist = rewriteEmbyPlaylist(text, finalUrl, {
+        token, filename, itemId, embyKey, audioStreamIndex,
+      }, await client.getPlaybackProxySecret());
+      headers.set('content-type', 'application/vnd.apple.mpegurl');
+      headers.delete('content-length');
+      headers.delete('content-range');
+      headers.delete('accept-ranges');
+      return new NextResponse(playlist, { headers });
     }
-
-    // 获取 Content-Type
-    const contentType = videoResponse.headers.get('content-type') || 'video/mp4';
-
-    // 构建响应头
-    const headers = new Headers();
-    headers.set('Content-Type', contentType);
-
-    // 复制重要的响应头
-    const contentLength = videoResponse.headers.get('content-length');
-    if (contentLength) {
-      headers.set('Content-Length', contentLength);
-    }
-
-    const acceptRanges = videoResponse.headers.get('accept-ranges');
-    if (acceptRanges) {
-      headers.set('Accept-Ranges', acceptRanges);
-    }
-
-    const contentRange = videoResponse.headers.get('content-range');
-    if (contentRange) {
-      headers.set('Content-Range', contentRange);
-    }
-
-    // 使用 URL 中的文件名
-    headers.set('Content-Disposition', `inline; filename="${filename}"`);
-
-    // 流式返回视频内容，不等待下载完成
-    return new NextResponse(videoResponse.body, {
-      status: videoResponse.status,
-      headers,
-    });
+    if (!headers.has('content-type')) headers.set('content-type', 'application/octet-stream');
+    return new NextResponse(response.body, { status: response.status, headers });
   } catch (error) {
-    console.error('[Emby Play] 错误:', error);
-    return NextResponse.json(
-      { error: '播放失败', details: (error as Error).message },
-      { status: 500 }
-    );
+    console.error('[Emby Play] 播放请求失败:', error instanceof Error ? error.message : 'unknown');
+    return NextResponse.json({ error: 'Emby 播放请求失败，请检查服务连接和转码状态' }, { status: 502 });
   }
 }

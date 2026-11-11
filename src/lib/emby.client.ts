@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { embyProxyUrl } from './emby-playback';
+
 interface EmbyConfig {
   ServerURL: string;
   ApiKey?: string;
@@ -645,29 +647,15 @@ export class EmbyClient {
     await this.ensureAuthenticated();
     const token = this.apiKey || this.authToken;
 
-    // 如果启用了代理播放且不是强制获取直接URL，返回代理URL。
-    // 注意：transcodeMp4 实际返回的是 HLS（master.m3u8），不能塞进
-    // /api/emby/play/proxy/video.mp4 —— 否则 ArtPlayer 会按 mp4 原生播放，
-    // Chrome/Edge 无法播放 HLS，且不会触发 hls.js 的第一方代理降级。
-    if (this.proxyPlay && !forceDirectUrl && !this.transcodeMp4) {
-      // 使用固定的token占位符，实际验证在服务端进行
-      const subscribeToken = 'proxy';
-      const filename = 'video';
-
-      // 构建代理URL（相对路径）
-      let proxyUrl = `/api/emby/play/${subscribeToken}/${filename}?itemId=${itemId}`;
-
-      // 如果有embyKey，添加到查询参数
-      if (this.embyKey) {
-        proxyUrl += `&embyKey=${this.embyKey}`;
-      }
-
-      // 如果指定了音轨，添加到查询参数
-      if (typeof audioStreamIndex === 'number' && audioStreamIndex >= 0) {
-        proxyUrl += `&audioStreamIndex=${audioStreamIndex}`;
-      }
-
-      return proxyUrl;
+    // Preserve HLS type while keeping manifests AND child requests same-origin.
+    if (this.proxyPlay && !forceDirectUrl) {
+      return embyProxyUrl({
+        token: 'proxy',
+        filename: this.transcodeMp4 || !direct ? 'master.m3u8' : 'video',
+        itemId,
+        embyKey: this.embyKey,
+        audioStreamIndex,
+      });
     }
 
     // 原有的直接播放逻辑 - 使用 URLSearchParams 构建查询参数
@@ -724,6 +712,18 @@ export class EmbyClient {
 
       return `${this.serverUrl}/Videos/${encodeURIComponent(itemId)}/master.m3u8?${query.toString()}`;
     }
+  }
+
+  async getPlaybackProxySecret(): Promise<string> {
+    await this.ensureAuthenticated();
+    const secret = this.apiKey || this.authToken;
+    if (!secret) throw new Error('Emby playback credentials are missing');
+    return secret;
+  }
+
+  getPlaybackHeaders(url: string): Record<string, string> {
+    if (new URL(url).origin !== new URL(this.serverUrl).origin) return {};
+    return { ...this.getHeaders(), 'X-Emby-Authorization': this.embyAuthorizationHeader };
   }
 
   getSubtitles(item: EmbyItem): Array<{ url: string; language: string; label: string }> {
