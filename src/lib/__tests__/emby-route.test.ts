@@ -30,7 +30,7 @@ test('preserves audio selection and rewrites the playlist to the authenticated r
   (global.fetch as jest.Mock).mockResolvedValue(new Response('#EXTM3U\n#EXTINF:4,\nseg.ts', {
     headers: { 'content-type': 'application/vnd.apple.mpegurl', 'content-length': '30' },
   }));
-  const response = await GET(request('&audioStreamIndex=3'), { params });
+  const response = await GET(request('&audioStreamIndex=1&AudioStreamIndex=3'), { params });
   expect(response.status).toBe(200);
   expect(client.getStreamUrl).toHaveBeenCalledWith('1', true, true, 3);
   expect(response.headers.get('content-length')).toBeNull();

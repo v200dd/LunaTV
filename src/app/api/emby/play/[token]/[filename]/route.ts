@@ -30,7 +30,7 @@ export async function GET(
     const itemId = query.get('itemId');
     if (!itemId) return NextResponse.json({ error: '缺少 itemId 参数' }, { status: 400 });
     const embyKey = query.get('embyKey') || undefined;
-    const audioValue = query.get('audioStreamIndex');
+    const audioValue = query.get('AudioStreamIndex') ?? query.get('audioStreamIndex');
     const audioStreamIndex = audioValue !== null ? Number(audioValue) : undefined;
     if (audioStreamIndex !== undefined && (!Number.isInteger(audioStreamIndex) || audioStreamIndex < 0)) {
       return NextResponse.json({ error: '无效的音轨索引' }, { status: 400 });
